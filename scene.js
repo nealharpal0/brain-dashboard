@@ -126,7 +126,6 @@ export class BrainScene {
     this.resizeObserver.observe(host);
     this.resize();
 
-    this.insets = { left: 0, right: 0, top: 0, bottom: 0 };
     this.last = performance.now();
     this.elapsed = 0;
     this.renderer.setAnimationLoop(() => this.#frame());
@@ -473,7 +472,7 @@ export class BrainScene {
     const size = g.size.array;
     this.nodes.forEach((n, i) => {
       pos[i * 3] = n.x; pos[i * 3 + 1] = n.y; pos[i * 3 + 2] = n.z;
-      size[i] = n.size * (1 + 1.1 * n.flash) * (i === this.focus ? 1.35 : 1);
+      size[i] = n.size * (this.sizeBoost || 1) * (1 + 1.1 * n.flash) * (i === this.focus ? 1.35 : 1);
     });
     g.position.needsUpdate = g.size.needsUpdate = true;
 
@@ -594,13 +593,40 @@ export class BrainScene {
 
   /** Ruimte die panelen over het canvas innemen (px); de kaart wordt in het vrije midden gecentreerd. */
   setInsets(insets) {
-    this.insets = { left: 0, right: 0, top: 0, bottom: 0, ...insets };
-    this.resize();
+    this.insetsTarget = { left: 0, right: 0, top: 0, bottom: 0, ...insets };
+    if (!this.insetsCur || this.reduced) { this.insetsCur = { ...this.insetsTarget }; this.#applyOffset(); }
+  }
+
+  /** Kaart stilzetten als hij niet te zien is (scheelt batterij). */
+  setPaused(paused) {
+    if (paused === !!this.paused) return;
+    this.paused = paused;
+    this.renderer.setAnimationLoop(paused ? null : () => this.#frame());
+    if (!paused) this.last = performance.now();
+  }
+
+  #applyOffset() {
+    const { left = 0, right = 0, top = 0, bottom = 0 } = this.insetsCur || {};
+    // schuif het middelpunt naar het vrije gebied tussen de panelen
+    this.camera.setViewOffset(this.w, this.h, (right - left) / 2, (bottom - top) / 2, this.w, this.h);
+    this.camera.updateProjectionMatrix();
+  }
+
+  #easeInsets(dt) {
+    if (!this.insetsTarget || !this.insetsCur) return;
+    const k = 1 - Math.exp(-dt * 9);
+    let moved = false;
+    for (const key of ['left', 'right', 'top', 'bottom']) {
+      const d = this.insetsTarget[key] - this.insetsCur[key];
+      if (Math.abs(d) > 0.3) { this.insetsCur[key] += d * k; moved = true; }
+      else this.insetsCur[key] = this.insetsTarget[key];
+    }
+    if (moved) this.#applyOffset();
   }
 
   fitView(instant = false) {
     const R = Math.max(this.#graphRadius(), this.ringRadius || 0) * 1.02;
-    const { left, right, top, bottom } = this.insets;
+    const { left, right, top, bottom } = this.insetsTarget || { left: 0, right: 0, top: 0, bottom: 0 };
     const safeW = Math.max(160, this.w - left - right);
     const safeH = Math.max(160, this.h - top - bottom);
     const f = (this.h / 2) / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
@@ -652,16 +678,18 @@ export class BrainScene {
     const el = this.renderer.domElement;
     let down = null;
     el.addEventListener('pointermove', e => {
-      this.pointer = { x: e.offsetX, y: e.offsetY };
+      // bij aanraken geen zweef-labels: die blijven anders hangen onder je vinger
+      this.pointer = e.pointerType === 'mouse' || e.pointerType === 'pen' ? { x: e.offsetX, y: e.offsetY } : null;
     });
     el.addEventListener('pointerleave', () => { this.pointer = null; });
     el.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+    el.addEventListener('pointercancel', () => { down = null; });
     el.addEventListener('pointerup', e => {
       if (!down) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       down = null;
-      if (moved > 6) return;
-      const hit = this.pick(e.offsetX, e.offsetY);
+      if (moved > (e.pointerType === 'touch' ? 12 : 6)) return;
+      const hit = this.pick(e.offsetX, e.offsetY, e.pointerType === 'touch');
       if (hit && hit.kind === 'node') this.select(hit.index);
       else if (hit && hit.kind === 'task') this.onSelect(null, this.tasks[hit.index]);
       else this.select(-1, { fly: false });
@@ -674,7 +702,7 @@ export class BrainScene {
     return { x: (p.x * 0.5 + 0.5) * this.w, y: (-p.y * 0.5 + 0.5) * this.h, z: p.z };
   }
 
-  pick(x, y) {
+  pick(x, y, touch = false) {
     let best = null;
     const v = new THREE.Vector3();
     this.nodes.forEach((n, i) => {
@@ -682,14 +710,14 @@ export class BrainScene {
       const s = this.#screen(v.set(n.x, n.y, n.z));
       if (s.z > 1) return;
       const d = Math.hypot(s.x - x, s.y - y);
-      const reach = 9 + n.size * 0.6;
+      const reach = (touch ? 22 : 9) + n.size * (this.sizeBoost || 1) * 0.6;
       if (d < reach && (!best || d < best.d)) best = { kind: 'node', index: i, d, sx: s.x, sy: s.y };
     });
     this.tasks.forEach((t, i) => {
       const s = this.#screen(t.world);
       if (s.z > 1) return;
       const d = Math.hypot(s.x - x, s.y - y);
-      if (d < 16 && (!best || d < best.d)) best = { kind: 'task', index: i, d, sx: s.x, sy: s.y };
+      if (d < (touch ? 30 : 16) && (!best || d < best.d)) best = { kind: 'task', index: i, d, sx: s.x, sy: s.y };
     });
     return best;
   }
@@ -701,10 +729,8 @@ export class BrainScene {
     this.w = w; this.h = h;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    const { left = 0, right = 0, top = 0, bottom = 0 } = this.insets || {};
-    // schuif het middelpunt naar het vrije gebied tussen de panelen
-    this.camera.setViewOffset(w, h, (right - left) / 2, (bottom - top) / 2, w, h);
-    this.camera.updateProjectionMatrix();
+    this.sizeBoost = w < 600 ? 1.45 : 1;  // op een telefoon grotere sterren
+    this.#applyOffset();
     const dpr = this.renderer.getPixelRatio();
     this.uniforms.uScale.value = (h * dpr) / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
   }
@@ -715,6 +741,7 @@ export class BrainScene {
     this.last = nowMs;
     this.elapsed += dt;
     const t = this.elapsed;
+    this.#easeInsets(dt);
     this.uniforms.uTime.value = t;
 
     if (this.alpha > 0.02 && this.nodes.length) {
@@ -755,7 +782,7 @@ export class BrainScene {
         const n = this.nodes[this.focus];
         this.marker.visible = true;
         this.marker.position.set(n.x, n.y, n.z);
-        this.marker.scale.setScalar(n.size * 2.6 * (1 + (this.reduced ? 0 : 0.06 * Math.sin(t * 3))));
+        this.marker.scale.setScalar(n.size * (this.sizeBoost || 1) * 2.6 * (1 + (this.reduced ? 0 : 0.06 * Math.sin(t * 3))));
       } else this.marker.visible = false;
     }
 

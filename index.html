@@ -3,12 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; manifest-src 'self'; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0B1530">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Brein">
   <title>Neal's brein</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="preload" href="fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/cormorant-garamond-latin-600-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
@@ -16,7 +23,7 @@
 </head>
 <body>
   <div class="app">
-    <div id="stage" class="stage" aria-label="3D-kaart van je second brain. Sleep om te draaien, scroll om te zoomen, klik op een ster voor details.">
+    <div id="stage" class="stage" aria-label="3D-kaart van je second brain. Sleep om te draaien, knijp of scroll om te zoomen, tik op een ster voor details.">
       <div id="labels" class="labels" aria-hidden="true"></div>
       <div id="tooltip" class="tooltip" role="status" hidden></div>
       <div id="caption" class="caption" aria-live="polite" hidden></div>
@@ -52,25 +59,37 @@
     <div class="dock">
       <div id="legend" class="legend" aria-label="Gebieden tonen of verbergen"></div>
       <div class="dock-actions">
-        <button id="fit" type="button" class="ghost">Alles in beeld</button>
-        <button id="play" type="button" class="play" aria-pressed="false">Speel de week af</button>
+        <button id="fit" type="button" class="ghost" aria-label="Alles in beeld">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></svg>
+          <span class="lbl">Alles in beeld</span>
+        </button>
+        <button id="play" type="button" class="play" aria-pressed="false" aria-label="Speel de week af">
+          <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
+          <svg class="i-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+          <span class="lbl">Speel de week af</span>
+        </button>
       </div>
     </div>
 
-    <nav class="tabs" role="tablist" aria-label="Panelen">
-      <button type="button" role="tab" data-tab="todo" aria-controls="todo">Wat jij moet doen</button>
-      <button type="button" role="tab" data-tab="claude" aria-controls="claude">Wat Claude deed</button>
-    </nav>
+    <section id="sheet" class="sheet" aria-label="Panelen" data-detent="peek">
+      <div class="sheet-head" id="sheet-head">
+        <button id="grip" class="grip" type="button" aria-label="Paneel groter of kleiner maken" aria-expanded="false" aria-controls="sheet"></button>
+        <nav class="tabs" role="tablist" aria-label="Panelen">
+          <button type="button" role="tab" data-tab="todo" aria-controls="todo">Wat jij moet doen <span class="tab-n" id="tab-n-todo"></span></button>
+          <button type="button" role="tab" data-tab="claude" aria-controls="claude">Wat Claude deed</button>
+        </nav>
+      </div>
 
-    <aside id="claude" class="panel panel-claude" aria-labelledby="claude-h">
-      <h2 id="claude-h">Wat Claude deed</h2>
-      <div id="claude-body" class="panel-body"></div>
-    </aside>
+      <aside id="claude" class="panel panel-claude" aria-labelledby="claude-h">
+        <h2 id="claude-h">Wat Claude deed</h2>
+        <div id="claude-body" class="panel-body"></div>
+      </aside>
 
-    <aside id="todo" class="panel panel-todo" aria-labelledby="todo-h">
-      <h2 id="todo-h">Wat jij moet doen</h2>
-      <div id="todo-body" class="panel-body"></div>
-    </aside>
+      <aside id="todo" class="panel panel-todo" aria-labelledby="todo-h">
+        <h2 id="todo-h">Wat jij moet doen</h2>
+        <div id="todo-body" class="panel-body"></div>
+      </aside>
+    </section>
 
     <div id="connect" class="connect" hidden>
       <form id="connect-form" class="connect-card" autocomplete="off">
@@ -83,9 +102,9 @@
           <li>Plak de token hieronder.</li>
         </ol>
         <label for="token-input">Token</label>
-        <input id="token-input" type="password" inputmode="text" spellcheck="false" placeholder="github_pat_…" autocomplete="off">
+        <input id="token-input" type="password" inputmode="text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="github_pat_…" autocomplete="off">
         <label for="repo-input">Repo</label>
-        <input id="repo-input" type="text" spellcheck="false" autocomplete="off">
+        <input id="repo-input" type="text" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off">
         <p id="connect-msg" class="connect-msg" role="alert" hidden></p>
         <button id="connect-go" type="submit" class="play">Verbinden</button>
       </form>

@@ -36,6 +36,8 @@ const state = {
   logLimit: 25,
   tab: 'todo',
   replay: null,
+  detent: 'peek',
+  justDragged: 0,
 };
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -46,8 +48,15 @@ const scene = new BrainScene($('#stage'), {
   onSelect: (node, task) => (task ? selectTask(task) : showCard(node)),
 });
 
+const isMobile = () => window.matchMedia('(max-width: 899px)').matches;
+
 function updateInsets() {
-  if (window.matchMedia('(max-width: 899px)').matches) { scene.setInsets({}); return; }
+  if (isMobile()) {
+    const top = $('.top').getBoundingClientRect().bottom;
+    document.documentElement.style.setProperty('--top-h', `${Math.round(top)}px`);
+    scene.setInsets({ top, bottom: sheetHeights()[state.detent] + 62 });
+    return;
+  }
   const l = $('#claude').getBoundingClientRect();
   const r = $('#todo').getBoundingClientRect();
   const top = $('.top').getBoundingClientRect();
@@ -55,7 +64,85 @@ function updateInsets() {
   document.documentElement.style.setProperty('--dock-h', `${Math.round(window.innerHeight - dock.top)}px`);
   scene.setInsets({ left: l.right, right: window.innerWidth - r.left, top: top.bottom, bottom: window.innerHeight - dock.top });
 }
-window.addEventListener('resize', updateInsets);
+// ---------- paneel onderaan (telefoon) ----------
+
+/** Drie standen: alleen de kop (kaart groot), half, of bijna het hele scherm. */
+function sheetHeights() {
+  const vh = window.innerHeight;
+  const safe = parseFloat(getComputedStyle($('#sheet')).paddingBottom) || 0;
+  const head = $('#sheet-head').offsetHeight || 80;
+  const top = $('.top').getBoundingClientRect().bottom;
+  const full = Math.round(vh - top - 4);
+  const peek = Math.min(Math.round(head + 96 + safe), full);
+  const half = Math.round(Math.min(Math.max(vh * 0.52, peek + 140), full));
+  return { peek, half, full };
+}
+
+function setSheet(detent, { instant = false } = {}) {
+  if (!isMobile()) return;
+  state.detent = detent;
+  if (instant) document.body.classList.add('sheet-dragging');
+  document.documentElement.style.setProperty('--sheet-h', `${sheetHeights()[detent]}px`);
+  $('#sheet').dataset.detent = detent;
+  document.body.dataset.sheet = detent;
+  if (detent === 'full') $('#card').hidden = true;
+  $('#grip').setAttribute('aria-expanded', detent === 'peek' ? 'false' : 'true');
+  $('#grip').setAttribute('aria-label', detent === 'full' ? 'Paneel kleiner maken' : 'Paneel groter maken');
+  scene.setPaused(detent === 'full');
+  updateInsets();
+  if (instant) requestAnimationFrame(() => requestAnimationFrame(() => document.body.classList.remove('sheet-dragging')));
+}
+
+(function bindSheet() {
+  const head = $('#sheet-head');
+  let drag = null;
+  head.addEventListener('pointerdown', e => {
+    if (!isMobile() || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    drag = { y: e.clientY, h: sheetHeights()[state.detent], id: e.pointerId, moved: false, lastY: e.clientY, lastT: performance.now(), v: 0 };
+  });
+  window.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved) {
+      if (Math.abs(dy) < 6) return;
+      drag.moved = true;
+      document.body.classList.add('sheet-dragging');
+    }
+    const hs = sheetHeights();
+    const h = Math.max(hs.peek * 0.85, Math.min(hs.full, drag.h - dy));
+    document.documentElement.style.setProperty('--sheet-h', `${h}px`);
+    const now = performance.now();
+    drag.v = (e.clientY - drag.lastY) / Math.max(1, now - drag.lastT);
+    drag.lastY = e.clientY;
+    drag.lastT = now;
+  });
+  const end = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    document.body.classList.remove('sheet-dragging');
+    if (!d.moved) return;
+    state.justDragged = performance.now();
+    const hs = sheetHeights();
+    const h = d.h - (e.clientY - d.y);
+    let next;
+    if (d.v < -0.45) next = h > hs.half + 10 ? 'full' : 'half';
+    else if (d.v > 0.45) next = h < hs.half - 10 ? 'peek' : 'half';
+    else next = ['peek', 'half', 'full'].reduce((a, k) => (Math.abs(hs[k] - h) < Math.abs(hs[a] - h) ? k : a), 'peek');
+    setSheet(next);
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+  $('#grip').addEventListener('click', () => {
+    if (performance.now() - state.justDragged < 350) return;
+    setSheet({ peek: 'half', half: 'full', full: 'peek' }[state.detent]);
+  });
+})();
+
+window.addEventListener('resize', () => {
+  if (isMobile()) setSheet(state.detent, { instant: true });
+  else { scene.setPaused(false); updateInsets(); }
+});
 updateInsets();
 
 // ---------- hulpjes ----------
@@ -270,6 +357,10 @@ function buildModel(files) {
   });
   const edges = graph.edges.map(([a, b]) => [index.get(a), index.get(b)]);
 
+  // vaste sleutels, zodat kaartje en lijst naar hetzelfde item wijzen
+  checklist.groups.forEach((g, gi) => g.items.forEach((it, ii) => { it.key = `g${gi}i${ii}`; }));
+  checklist.questions.forEach((q, k) => { q.key = `q${k}`; });
+
   // taken voor de baan rond de kaart
   const openItems = [];
   for (const g of checklist.groups) {
@@ -412,11 +503,8 @@ function renderTodo(m) {
   const box = $('#todo-body');
   box.textContent = '';
 
-  if (m.priorities.length) {
-    const pr = el('div', 'compass');
-    pr.innerHTML = `<h3>Jouw volgorde</h3><ol>${m.priorities.map(p => `<li title="${esc(p.note)}">${esc(p.name)}</li>`).join('')}</ol>`;
-    box.append(pr);
-  }
+  const openCount = m.openItems.length + m.openQuestions.length;
+  $('#tab-n-todo').textContent = openCount ? String(openCount) : '';
 
   // eerst dit: de drie dichtstbijzijnde deadlines
   const dated = m.openItems.filter(it => it.effectiveDue).sort((a, b) => a.effectiveDue.date.localeCompare(b.effectiveDue.date));
@@ -429,6 +517,12 @@ function renderTodo(m) {
     box.append(sec);
   }
 
+  if (m.priorities.length) {
+    const pr = el('div', 'compass');
+    pr.innerHTML = `<h3>Jouw volgorde</h3><ol>${m.priorities.map(p => `<li title="${esc(p.note)}">${esc(p.name)}</li>`).join('')}</ol>`;
+    box.append(pr);
+  }
+
   if (m.openQuestions.length) {
     const sec = el('section', 'questions');
     sec.append(el('h3', null, `Vragen voor jou <span class="count">${m.openQuestions.length}</span>`));
@@ -437,6 +531,7 @@ function renderTodo(m) {
       const li = el('li', 'q');
       li.innerHTML = `<details><summary><span class="q-mark" aria-hidden="true"></span>${esc(q.title)}</summary><div class="q-body">${md(q.body)}<p class="hint">Je antwoord zet je in Checklist.md, achter <strong>Antwoord:</strong>. Claude verwerkt het daarna.</p></div></details>`;
       if (q.pages[0]) li.dataset.page = q.pages[0];
+      li.dataset.key = q.key;
       ul.append(li);
     }
     sec.append(ul);
@@ -479,6 +574,8 @@ function taskRow(it, { compact = false } = {}) {
   tick.style.borderColor = URGENCY[u].color;
   li.querySelector('summary, .task-head').prepend(tick);
   if (it.pages[0]) li.dataset.page = it.pages[0];
+  if (compact) li.dataset.task = it.key;
+  else li.dataset.key = it.key;
   return li;
 }
 
@@ -549,13 +646,45 @@ function focusPage(id) {
     scene.setHiddenClusters(state.hidden);
     renderLegend(state.model);
   }
+  if (isMobile() && state.detent !== 'peek') setSheet('peek');
   scene.select(i);
-  if (window.matchMedia('(max-width: 899px)').matches) $('#stage').scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
 }
 
 function selectTask(task) {
   if (task.target >= 0) focusPage(state.model.nodes[task.target].id);
+  showTaskCard(task);
+}
+
+function showTaskCard(task) {
+  const card = $('#card');
+  const it = task.item;
+  const isQ = task.kind === 'question';
+  const when = isQ ? 'Vraag voor jou' : it.effectiveDue ? dueText(it.effectiveDue) : 'Actie zonder datum';
+  const kicker = when.charAt(0).toUpperCase() + when.slice(1) + (!isQ && it.group ? `, ${it.group}` : '');
+  const body = isQ ? it.body : it.rest;
+  card.innerHTML = `
+    <button type="button" class="close" data-action="close-card" aria-label="Sluiten">×</button>
+    <p class="card-kicker"><span class="sw"></span>${esc(kicker)}</p>
+    <h2>${esc(task.title)}</h2>
+    ${body && P.plain(body) ? `<div class="card-sum">${md(body)}</div>` : ''}
+    ${!isQ && it.stepsTotal ? `<p class="muted card-steps">${it.stepsDone} van ${it.stepsTotal} stappen gedaan</p>` : ''}
+    ${isQ ? '<p class="hint">Je antwoord zet je in Checklist.md, achter <strong>Antwoord:</strong>.</p>' : ''}
+    <p class="card-links"><button type="button" class="linkish" data-action="show-in-list" data-key="${esc(it.key)}">Toon in de lijst</button></p>`;
+  card.querySelector('.sw').style.background = task.color;
+  card.hidden = false;
+}
+
+function showInList(key) {
   setTab('todo');
+  if (isMobile() && state.detent === 'peek') setSheet('half');
+  const row = document.querySelector(`#todo-body [data-key="${CSS.escape(key)}"]`);
+  if (!row) return;
+  const d = row.querySelector('details');
+  if (d) d.open = true;
+  row.classList.remove('flash');
+  void row.offsetWidth;
+  row.classList.add('flash');
+  setTimeout(() => row.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' }), isMobile() ? 340 : 0);
 }
 
 function setTab(tab) {
@@ -574,8 +703,8 @@ function toggleReplay() {
   scene.select(-1, { fly: false });
   scene.fitView();
   state.replay = { entries, k: 0, timer: null };
-  $('#play').textContent = 'Stoppen';
-  $('#play').setAttribute('aria-pressed', 'true');
+  setPlayLabel('Stoppen', true);
+  if (isMobile()) { setSheet('peek'); $('#card').hidden = true; }
   const stepMs = reducedMotion ? 1800 : 1150;
   const step = () => {
     const r = state.replay;
@@ -592,11 +721,17 @@ function toggleReplay() {
   step();
 }
 
+function setPlayLabel(text, on) {
+  const b = $('#play');
+  b.querySelector('.lbl').textContent = text;
+  b.setAttribute('aria-label', text);
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
 function stopReplay() {
   if (state.replay) clearTimeout(state.replay.timer);
   state.replay = null;
-  $('#play').textContent = 'Speel de week af';
-  $('#play').setAttribute('aria-pressed', 'false');
+  setPlayLabel('Speel de week af', false);
   setTimeout(() => { if (!state.replay) $('#caption').hidden = true; }, 1600);
 }
 
@@ -722,11 +857,16 @@ document.addEventListener('click', e => {
   }
   const action = t.dataset.action;
   if (action === 'more-log') { state.logLimit += 25; renderClaude(state.model); return; }
-  if (action === 'close-card') { scene.select(-1, { fly: false }); return; }
-  if (action === 'focus-task' || (t.dataset.page && e.target.closest('summary'))) {
-    const page = t.closest('[data-page]');
-    if (page) focusPage(page.dataset.page);
+  if (action === 'close-card') { scene.select(-1, { fly: false }); $('#card').hidden = true; return; }
+  if (action === 'show-in-list') { showInList(t.dataset.key); return; }
+  if (action === 'focus-task') {
+    const key = t.closest('[data-task]')?.dataset.task;
+    const task = state.model.tasks.find(x => x.item.key === key);
+    if (task) selectTask(task);
+    return;
   }
+  // op de computer: openklappen laat ook de pagina op de kaart zien; op de telefoon alleen openklappen
+  if (t.dataset.page && e.target.closest('summary') && !isMobile()) focusPage(t.dataset.page);
 });
 
 $('#refresh').addEventListener('click', () => refresh(true));
@@ -744,11 +884,18 @@ $('#settings').addEventListener('click', () => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { $('#menu').hidden = true; scene.select(-1, { fly: false }); }
 });
-for (const b of document.querySelectorAll('.tabs button')) b.addEventListener('click', () => setTab(b.dataset.tab));
+for (const b of document.querySelectorAll('.tabs button')) {
+  b.addEventListener('click', () => {
+    if (performance.now() - state.justDragged < 350) return;
+    setTab(b.dataset.tab);
+    if (isMobile() && state.detent === 'peek') setSheet('half');
+  });
+}
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
 setInterval(() => { if (state.model) renderSync(); }, 60000);
 
 setTab('todo');
+setSheet('peek', { instant: true });
 if (state.token) refresh(true);
 else showConnect();
