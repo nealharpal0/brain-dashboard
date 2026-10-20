@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0B1530">
+  <title>Neal's brein</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/cormorant-garamond-latin-600-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <div id="stage" class="stage" aria-label="3D-kaart van je second brain. Sleep om te draaien, scroll om te zoomen, klik op een ster voor details.">
+      <div id="labels" class="labels" aria-hidden="true"></div>
+      <div id="tooltip" class="tooltip" role="status" hidden></div>
+      <div id="caption" class="caption" aria-live="polite" hidden></div>
+      <section id="card" class="card" aria-live="polite" hidden></section>
+      <p id="status" class="status" role="status" hidden></p>
+    </div>
+
+    <header class="top">
+      <div class="brand-wrap">
+        <h1 class="brand">Neal's brein</h1>
+        <p id="sync" class="sync"></p>
+      </div>
+      <div class="top-actions">
+        <button id="refresh" class="icon-btn" type="button" aria-label="Verversen" title="Verversen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="settings" class="icon-btn" type="button" aria-label="Instellingen" title="Instellingen" aria-expanded="false" aria-controls="menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <div id="menu" class="menu" hidden>
+          <p>Verbonden met <strong id="menu-repo"></strong>, branch main.</p>
+          <p class="muted">De token staat alleen in deze browser.</p>
+          <button id="forget" type="button" class="danger">Token vergeten op dit apparaat</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="error" class="error" role="alert" hidden>
+      <p></p>
+      <button id="error-fix" type="button">Nieuwe token invoeren</button>
+    </div>
+
+    <div class="dock">
+      <div id="legend" class="legend" aria-label="Gebieden tonen of verbergen"></div>
+      <div class="dock-actions">
+        <button id="fit" type="button" class="ghost">Alles in beeld</button>
+        <button id="play" type="button" class="play" aria-pressed="false">Speel de week af</button>
+      </div>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Panelen">
+      <button type="button" role="tab" data-tab="todo" aria-controls="todo">Wat jij moet doen</button>
+      <button type="button" role="tab" data-tab="claude" aria-controls="claude">Wat Claude deed</button>
+    </nav>
+
+    <aside id="claude" class="panel panel-claude" aria-labelledby="claude-h">
+      <h2 id="claude-h">Wat Claude deed</h2>
+      <div id="claude-body" class="panel-body"></div>
+    </aside>
+
+    <aside id="todo" class="panel panel-todo" aria-labelledby="todo-h">
+      <h2 id="todo-h">Wat jij moet doen</h2>
+      <div id="todo-body" class="panel-body"></div>
+    </aside>
+
+    <div id="connect" class="connect" hidden>
+      <form id="connect-form" class="connect-card" autocomplete="off">
+        <h2>Verbind je second brain</h2>
+        <p>Deze pagina staat openbaar op GitHub Pages, je notities niet. Ze worden rechtstreeks uit je privé-repo in deze browser geladen, met een token die alleen op dit apparaat blijft.</p>
+        <ol class="steps">
+          <li>Maak een <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">fine-grained token</a> aan.</li>
+          <li>Bij <em>Repository access</em>: kies <em>Only select repositories</em> en dan <strong>second-brain</strong>.</li>
+          <li>Bij <em>Permissions</em>: zet <em>Contents</em> op <strong>Read-only</strong>. Meer is niet nodig.</li>
+          <li>Plak de token hieronder.</li>
+        </ol>
+        <label for="token-input">Token</label>
+        <input id="token-input" type="password" inputmode="text" spellcheck="false" placeholder="github_pat_…" autocomplete="off">
+        <label for="repo-input">Repo</label>
+        <input id="repo-input" type="text" spellcheck="false" autocomplete="off">
+        <p id="connect-msg" class="connect-msg" role="alert" hidden></p>
+        <button id="connect-go" type="submit" class="play">Verbinden</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
